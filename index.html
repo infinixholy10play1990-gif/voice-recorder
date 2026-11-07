@@ -27,6 +27,7 @@
   .tag { font-size:13px; padding:2px 8px; border-radius:20px; background:rgba(128,128,128,.25); }
   .tag.warn { background:var(--warn); color:#000; }
   #msg { color:var(--warn); min-height:24px; font-size:15px; }
+  #log { margin:8px 0 0; font:12px/1.5 monospace; direction:ltr; text-align:left; white-space:pre-wrap; word-break:break-all; color:var(--muted); }
 </style>
 </head>
 <body>
@@ -46,6 +47,11 @@
   <dl id="settings"></dl>
 </div>
 
+<div class="card">
+  <strong>سجل التشخيص</strong>
+  <pre id="log"></pre>
+</div>
+
 <div id="takes"></div>
 
 <div class="card">
@@ -59,7 +65,7 @@
 <script src="wavpack.js"></script>
 <script>
 "use strict";
-var PAGE_VERSION = "probe-1";
+var PAGE_VERSION = "probe-2";
 var COUNTDOWN_SECONDS = 3;   // سكوت للقياس (نفس عدّ audio_cli التنازلي: 3 ث)
 var SPEAK_SECONDS = 10;
 var BLOCK = 4096;            // عيّنات لكل رسالة من الـworklet
@@ -94,6 +100,15 @@ function constraintsFor(mode) {
 
 function setMsg(text) { $("msg").textContent = text || ""; }
 
+var t0 = performance.now();
+function log(text) {
+  var line = ((performance.now() - t0) / 1000).toFixed(1) + "s  " + text;
+  $("log").textContent += line + String.fromCharCode(10);
+}
+log("secure=" + window.isSecureContext + " worklet=" + (typeof AudioWorkletNode !== "undefined") +
+    " gUM=" + !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
+log("UA " + navigator.userAgent);
+
 function setBusy(flag) {
   busy = flag;
   $("btnRaw").disabled = flag;
@@ -121,13 +136,27 @@ async function record(mode) {
   try {
     // الـAudioContext لازم ينولد بنفس لمسة الزر (سياسة التشغيل التلقائي) — قبل أي await
     ctx = new (window.AudioContext || window.webkitAudioContext)();
+    log("1 AudioContext انعمل، الحالة=" + ctx.state + "، المعدّل=" + ctx.sampleRate);
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       throw new Error("هالمتصفّح ما بيعطي صلاحية المايك (لازم صفحة HTTPS)");
     }
     stream = await navigator.mediaDevices.getUserMedia(constraintsFor(mode));
+    log("2 المايك انفتح (الصلاحية انمنحت)");
     if (ctx.state === "suspended") await ctx.resume();
-    url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: "application/javascript" }));
-    await ctx.audioWorklet.addModule(url);
+    log("3 الحالة بعد resume=" + ctx.state);
+    var useWorklet = !!(ctx.audioWorklet && window.AudioWorkletNode);
+    if (useWorklet) {
+      try {
+        url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: "application/javascript" }));
+        await ctx.audioWorklet.addModule(url);
+        log("4 الـAudioWorklet تحمّل");
+      } catch (e) {
+        useWorklet = false;
+        log("4 الـAudioWorklet فشل (" + ((e && e.message) || e) + ") — بنستعمل الطريقة البديلة");
+      }
+    } else {
+      log("4 ما في AudioWorklet بهالمتصفّح — بنستعمل الطريقة البديلة");
+    }
 
     var track = stream.getAudioTracks()[0];
     var s = track.getSettings ? track.getSettings() : {};
@@ -160,14 +189,12 @@ async function record(mode) {
     var peakAll = 0;
 
     await new Promise(function (resolve, reject) {
-      node = new AudioWorkletNode(ctx, "rec");
       var src = ctx.createMediaStreamSource(stream);
-      gain = ctx.createGain(); gain.gain.value = 0;      // الـworklet لازم يكون موصول بالمخرج حتى ينسحب منه
-      src.connect(node); node.connect(gain); gain.connect(ctx.destination);
-      node.onprocessorerror = function () { reject(new Error("عطل بمعالج الصوت")); };
-      node.port.onmessage = function (e) {
-        var block = e.data;
-        if (firstAt === null) firstAt = performance.now();
+      gain = ctx.createGain(); gain.gain.value = 0;      // العقدة لازم تكون موصولة بالمخرج حتى ينسحب منها صوت
+      var finished = false;
+      function onBlock(block) {
+        if (finished) return;                     // كتل متأخرة بعد الاكتمال ما بتلمس العرض
+        if (firstAt === null) { firstAt = performance.now(); log("5 وصل أول صوت من المايك"); clearTimeout(watchdog); }
         chunks.push(block);
         count += block.length;
         var dbLevel = WavPack.dbfsRms(block);
@@ -177,9 +204,25 @@ async function record(mode) {
         var t = count / rate;
         if (t < COUNTDOWN_SECONDS) $("status").textContent = "سكوت… " + Math.ceil(COUNTDOWN_SECONDS - t);
         else $("status").textContent = "احكي… " + Math.max(0, Math.ceil(COUNTDOWN_SECONDS + SPEAK_SECONDS - t));
-        if (count >= total) resolve();
-      };
+        if (count >= total) { finished = true; resolve(); }
+      }
+      if (useWorklet) {
+        node = new AudioWorkletNode(ctx, "rec");
+        node.onprocessorerror = function () { reject(new Error("عطل بمعالج الصوت")); };
+        node.port.onmessage = function (e) { onBlock(e.data); };
+      } else {
+        // طريقة بديلة قديمة (ScriptProcessor) للمتصفّحات يلي ما بتشغّل الـworklet
+        node = ctx.createScriptProcessor(BLOCK, 1, 1);
+        node.onaudioprocess = function (e) { onBlock(new Float32Array(e.inputBuffer.getChannelData(0))); };
+      }
+      src.connect(node); node.connect(gain); gain.connect(ctx.destination);
       $("status").textContent = "سكوت… " + COUNTDOWN_SECONDS;
+      // حارس: لو ما وصل ولا صوت خلال 4 ث، ما بنضل معلّقين — بنطلّع السبب
+      var tr = stream.getAudioTracks()[0];
+      var watchdog = setTimeout(function () {
+        reject(new Error("ما وصل صوت من المايك بعد 4 ث (ctx=" + ctx.state + "، track.readyState=" + tr.readyState +
+                         "، muted=" + tr.muted + "، enabled=" + tr.enabled + "، worklet=" + useWorklet + ")"));
+      }, 4000);
     });
     var wallSeconds = (performance.now() - firstAt) / 1000;
 
@@ -220,6 +263,7 @@ async function record(mode) {
     addTake(mode, wav, meta, quick, ignored.length > 0);
     $("status").textContent = "تمّت";
   } catch (err) {
+    log("خطأ: " + (err && err.name) + " — " + ((err && err.message) || err));
     setMsg(describeError(err));
     $("status").textContent = "ما زبطت";
   } finally {

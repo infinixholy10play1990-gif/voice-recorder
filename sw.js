@@ -1,5 +1,5 @@
-/* sw.js — يخلّي الصفحة تشتغل بلا نت بعد أول فتحة. كاش بسيط: المخزَّن أولاً والشبكة احتياط. لتحديث الصفحة: غيّر اسم CACHE. */
-var CACHE = "probe-1";
+/* sw.js — يخلّي الصفحة تشتغل بلا نت بعد أول فتحة. الشبكة أولاً (التحديثات بتوصل فوراً) والكاش احتياط بلا نت. */
+var CACHE = "probe-2";
 var FILES = ["./", "index.html", "wavpack.js"];
 
 self.addEventListener("install", function (event) {
@@ -17,6 +17,10 @@ self.addEventListener("activate", function (event) {
 self.addEventListener("fetch", function (event) {
   if (event.request.method !== "GET") return;
   event.respondWith(
-    caches.match(event.request).then(function (hit) { return hit || fetch(event.request); })
+    fetch(event.request).then(function (res) {
+      var copy = res.clone();
+      caches.open(CACHE).then(function (c) { c.put(event.request, copy); });
+      return res;
+    }).catch(function () { return caches.match(event.request); })
   );
 });
