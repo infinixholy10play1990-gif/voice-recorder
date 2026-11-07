@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>مسجّل صوت</title>
+<style>
+  :root { --bg:#12161c; --fg:#e8ecf1; --muted:#9aa5b1; --card:#1c222b; --accent:#3b82f6; --warn:#f59e0b; --ok:#22c55e; --bad:#ef4444; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f5f7fa; --fg:#14181d; --muted:#5b6672; --card:#ffffff; } }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:17px/1.6 system-ui,"Segoe UI",Tahoma,sans-serif; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.sub { margin:0 0 16px; color:var(--muted); font-size:14px; }
+  .card { background:var(--card); border-radius:14px; padding:14px; margin-bottom:14px; }
+  button { font:inherit; font-weight:600; border:0; border-radius:12px; padding:16px; width:100%; color:#fff; background:var(--accent); margin-bottom:10px; }
+  button.alt { background:#6b7280; }
+  button.sm { width:auto; padding:8px 14px; font-size:15px; margin:0; }
+  button:disabled { opacity:.45; }
+  .big { font-size:34px; font-weight:700; text-align:center; margin:6px 0; min-height:48px; }
+  .meter { height:14px; background:rgba(128,128,128,.25); border-radius:7px; overflow:hidden; direction:ltr; }
+  .meter > div { height:100%; width:0; background:var(--ok); transition:width .08s; }
+  dl { margin:0; font-size:14px; display:grid; grid-template-columns:auto 1fr; gap:2px 12px; }
+  dt { color:var(--muted); } dd { margin:0; direction:ltr; text-align:left; word-break:break-all; }
+  .take { border-top:1px solid rgba(128,128,128,.3); padding-top:12px; margin-top:12px; }
+  .take audio { width:100%; margin:8px 0; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .tag { font-size:13px; padding:2px 8px; border-radius:20px; background:rgba(128,128,128,.25); }
+  .tag.warn { background:var(--warn); color:#000; }
+  #msg { color:var(--warn); min-height:24px; font-size:15px; }
+</style>
+</head>
+<body>
+<h1>مسجّل صوت — تجربة المرحلة 1</h1>
+<p class="sub">بيسجّل 3 ثواني سكوت (للقياس) وبعدها 10 ثواني حكي، بمعالجتين مختلفتين، وبيطلّع ملف لكل تسجيلة.</p>
+
+<div class="card">
+  <button id="btnRaw">سجّل — معالجة مطفية</button>
+  <button id="btnProc" class="alt">سجّل — معالجة مشغّلة (الافتراضي)</button>
+  <div class="big" id="status">جاهز</div>
+  <div class="meter"><div id="level"></div></div>
+  <div id="msg"></div>
+</div>
+
+<div class="card" id="settingsCard" hidden>
+  <strong>إعدادات المايك يلي رجّعها الجوال فعلياً</strong>
+  <dl id="settings"></dl>
+</div>
+
+<div id="takes"></div>
+
+<div class="card">
+  <dl>
+    <dt>نسخة الصفحة</dt><dd id="ver"></dd>
+    <dt>شغّالة بلا نت؟</dt><dd id="offline">...</dd>
+  </dl>
+  <p class="sub" style="margin:10px 0 0">لا تسكّر الصفحة قبل ما تنزّل كل تسجيلة — التسجيلات بالذاكرة بس.</p>
+</div>
+
+<script src="wavpack.js"></script>
+<script>
+"use strict";
+var PAGE_VERSION = "probe-1";
+var COUNTDOWN_SECONDS = 3;   // سكوت للقياس (نفس عدّ audio_cli التنازلي: 3 ث)
+var SPEAK_SECONDS = 10;
+var BLOCK = 4096;            // عيّنات لكل رسالة من الـworklet
+
+var $ = function (id) { return document.getElementById(id); };
+document.getElementById("ver").textContent = PAGE_VERSION;
+
+var takes = [];
+var busy = false;
+
+// الـworklet كنص (Blob) حتى تضل الصفحة ملفين بس ومضمونة بالكاش
+var WORKLET_SRC =
+  "class Rec extends AudioWorkletProcessor {" +
+  "  constructor(){ super(); this.buf = new Float32Array(" + BLOCK + "); this.n = 0; }" +
+  "  process(inputs){" +
+  "    var ch = inputs[0] && inputs[0][0];" +
+  "    if (!ch) return true;" +
+  "    for (var i = 0; i < ch.length; i++) {" +
+  "      this.buf[this.n++] = ch[i];" +
+  "      if (this.n === this.buf.length) { this.port.postMessage(this.buf.slice(0)); this.n = 0; }" +
+  "    }" +
+  "    return true;" +
+  "  }" +
+  "}" +
+  "registerProcessor('rec', Rec);";
+
+function constraintsFor(mode) {
+  // raw: كل معالجة المتصفّح مطفية. processed: صريحة مشغّلة = اللي بيشوفه أي تطبيق تسجيل عادي
+  var on = mode === "processed";
+  return { audio: { channelCount: 1, echoCancellation: on, noiseSuppression: on, autoGainControl: on, voiceIsolation: on } };
+}
+
+function setMsg(text) { $("msg").textContent = text || ""; }
+
+function setBusy(flag) {
+  busy = flag;
+  $("btnRaw").disabled = flag;
+  $("btnProc").disabled = flag;
+}
+
+function fmtDb(x) { return isFinite(x) ? x.toFixed(1) + " dBFS" : "-∞"; }
+
+function showSettings(info) {
+  var dl = $("settings");
+  dl.innerHTML = "";
+  Object.keys(info).forEach(function (k) {
+    var dt = document.createElement("dt"); dt.textContent = k;
+    var dd = document.createElement("dd"); dd.textContent = String(info[k]);
+    dl.appendChild(dt); dl.appendChild(dd);
+  });
+  $("settingsCard").hidden = false;
+}
+
+async function record(mode) {
+  if (busy) return;
+  setBusy(true);
+  setMsg("");
+  var ctx = null, stream = null, node = null, gain = null, url = null;
+  try {
+    // الـAudioContext لازم ينولد بنفس لمسة الزر (سياسة التشغيل التلقائي) — قبل أي await
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error("هالمتصفّح ما بيعطي صلاحية المايك (لازم صفحة HTTPS)");
+    }
+    stream = await navigator.mediaDevices.getUserMedia(constraintsFor(mode));
+    if (ctx.state === "suspended") await ctx.resume();
+    url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: "application/javascript" }));
+    await ctx.audioWorklet.addModule(url);
+
+    var track = stream.getAudioTracks()[0];
+    var s = track.getSettings ? track.getSettings() : {};
+    var caps = track.getCapabilities ? track.getCapabilities() : {};
+    var rate = ctx.sampleRate;
+    var info = {
+      "الوضع": mode === "raw" ? "معالجة مطفية" : "معالجة مشغّلة",
+      "معدّل العيّنات": rate + " Hz",
+      "echoCancellation": s.echoCancellation,
+      "noiseSuppression": s.noiseSuppression,
+      "autoGainControl": s.autoGainControl,
+      "voiceIsolation": s.voiceIsolation,
+      "channelCount": s.channelCount,
+      "المايك": track.label || "(بلا اسم)",
+    };
+    showSettings(info);
+    // طلب المعالجة المطفية لا يضمن إنو الجهاز طفّاها — بنحذّر لو الجوال ما نفّذ الطلب
+    var ignored = [];
+    if (mode === "raw") {
+      ["echoCancellation", "noiseSuppression", "autoGainControl"].forEach(function (k) {
+        if (s[k] !== false) ignored.push(k + "=" + s[k]);
+      });
+    }
+    if (ignored.length) setMsg("تنبيه: الجوال ما طفّى: " + ignored.join("، ") + " — التسجيلة مو خام فعلياً");
+
+    var total = Math.round(rate * (COUNTDOWN_SECONDS + SPEAK_SECONDS));
+    var chunks = [];
+    var count = 0;
+    var firstAt = null;
+    var peakAll = 0;
+
+    await new Promise(function (resolve, reject) {
+      node = new AudioWorkletNode(ctx, "rec");
+      var src = ctx.createMediaStreamSource(stream);
+      gain = ctx.createGain(); gain.gain.value = 0;      // الـworklet لازم يكون موصول بالمخرج حتى ينسحب منه
+      src.connect(node); node.connect(gain); gain.connect(ctx.destination);
+      node.onprocessorerror = function () { reject(new Error("عطل بمعالج الصوت")); };
+      node.port.onmessage = function (e) {
+        var block = e.data;
+        if (firstAt === null) firstAt = performance.now();
+        chunks.push(block);
+        count += block.length;
+        var dbLevel = WavPack.dbfsRms(block);
+        for (var i = 0; i < block.length; i++) { var a = Math.abs(block[i]); if (a > peakAll) peakAll = a; }
+        $("level").style.width = Math.max(0, Math.min(100, (dbLevel + 60) / 60 * 100)) + "%";
+        $("level").style.background = peakAll >= 0.999 ? "var(--bad)" : "var(--ok)";
+        var t = count / rate;
+        if (t < COUNTDOWN_SECONDS) $("status").textContent = "سكوت… " + Math.ceil(COUNTDOWN_SECONDS - t);
+        else $("status").textContent = "احكي… " + Math.max(0, Math.ceil(COUNTDOWN_SECONDS + SPEAK_SECONDS - t));
+        if (count >= total) resolve();
+      };
+      $("status").textContent = "سكوت… " + COUNTDOWN_SECONDS;
+    });
+    var wallSeconds = (performance.now() - firstAt) / 1000;
+
+    // تجميع العيّنات وقصّها لطول مضبوط (الكتلة الأخيرة ممكن تزيد)
+    var all = new Float32Array(total);
+    var off = 0;
+    for (var c = 0; c < chunks.length && off < total; c++) {
+      var part = chunks[c].subarray(0, Math.min(chunks[c].length, total - off));
+      all.set(part, off); off += part.length;
+    }
+    var pcm = WavPack.floatToInt16(all);
+    var cdSamples = Math.round(rate * COUNTDOWN_SECONDS);
+    var meta = {
+      page_version: PAGE_VERSION,
+      mode: mode,
+      recorded_at: new Date().toISOString(),
+      sample_rate: rate,
+      countdown_seconds: COUNTDOWN_SECONDS,
+      speak_seconds: SPEAK_SECONDS,
+      samples: pcm.length,
+      wall_seconds: wallSeconds,                  // الزمن الفعلي مقابل samples/rate: فرق كبير = عيّنات انفقدت
+      requested_constraints: constraintsFor(mode).audio,
+      track_settings: s,
+      track_capabilities: {
+        echoCancellation: caps.echoCancellation, noiseSuppression: caps.noiseSuppression, autoGainControl: caps.autoGainControl,
+      },
+      track_label: track.label,
+      base_latency: ctx.baseLatency,
+      user_agent: navigator.userAgent,
+    };
+    var wav = WavPack.encodeWav(pcm, rate, meta);
+    var quick = {
+      noise: WavPack.dbfsRms(all.subarray(0, cdSamples)),
+      speech: WavPack.dbfsRms(all.subarray(cdSamples)),
+      peak: WavPack.peakDbfs(all),
+      clipped: WavPack.countClipped(pcm),
+    };
+    addTake(mode, wav, meta, quick, ignored.length > 0);
+    $("status").textContent = "تمّت";
+  } catch (err) {
+    setMsg(describeError(err));
+    $("status").textContent = "ما زبطت";
+  } finally {
+    try { if (node) node.disconnect(); } catch (e) {}
+    try { if (gain) gain.disconnect(); } catch (e) {}
+    try { if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+    try { if (ctx) await ctx.close(); } catch (e) {}
+    if (url) URL.revokeObjectURL(url);
+    $("level").style.width = "0";
+    setBusy(false);
+  }
+}
+
+function describeError(err) {
+  var name = err && err.name;
+  if (name === "NotAllowedError") return "المايك محجوب — اسمح فيه من إعدادات الموقع بالمتصفّح";
+  if (name === "NotFoundError") return "ما في مايك";
+  if (name === "NotReadableError") return "المايك مشغول بتطبيق تاني";
+  return "خطأ: " + ((err && err.message) || err);
+}
+
+function stamp(d) {
+  function p(n) { return String(n).padStart(2, "0"); }
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "T" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+}
+
+function addTake(mode, wav, meta, quick, notRaw) {
+  var blob = new Blob([wav], { type: "audio/wav" });
+  var objUrl = URL.createObjectURL(blob);
+  var name = "probe-" + mode + "-" + stamp(new Date()) + ".wav";
+  var take = { name: name, downloaded: false };
+  takes.push(take);
+
+  var div = document.createElement("div"); div.className = "take";
+  var head = document.createElement("div"); head.className = "row";
+  var tag = document.createElement("span"); tag.className = "tag" + (notRaw ? " warn" : "");
+  tag.textContent = (mode === "raw" ? "مطفية" : "مشغّلة") + (notRaw ? " (ما انطفت فعلياً)" : "");
+  var label = document.createElement("span"); label.textContent = name; label.style.direction = "ltr";
+  head.appendChild(tag); head.appendChild(label);
+  var audio = document.createElement("audio"); audio.controls = true; audio.src = objUrl;
+  var stats = document.createElement("div"); stats.className = "sub"; stats.style.fontSize = "14px";
+  stats.textContent = "سكوت " + fmtDb(quick.noise) + " · حكي " + fmtDb(quick.speech) + " · ذروة " + fmtDb(quick.peak) +
+    " · مقصوص " + quick.clipped + " عيّنة · " + meta.sample_rate + " Hz";
+  var btn = document.createElement("button"); btn.className = "sm"; btn.textContent = "نزّل الملف";
+  btn.onclick = function () {
+    var a = document.createElement("a"); a.href = objUrl; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    take.downloaded = true; btn.textContent = "نزّلته ✓";
+  };
+  div.appendChild(head); div.appendChild(audio); div.appendChild(stats); div.appendChild(btn);
+  $("takes").insertBefore(div, $("takes").firstChild);
+}
+
+window.addEventListener("beforeunload", function (e) {
+  if (takes.some(function (t) { return !t.downloaded; })) { e.preventDefault(); e.returnValue = ""; }
+});
+
+$("btnRaw").onclick = function () { record("raw"); };
+$("btnProc").onclick = function () { record("processed"); };
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").then(function () { return navigator.serviceWorker.ready; })
+    .then(function () { $("offline").textContent = "أي، مخزّنة"; })
+    .catch(function (e) { $("offline").textContent = "لأ: " + e.message; });
+} else {
+  $("offline").textContent = "لأ (المتصفّح ما بيدعم)";
+}
+</script>
+</body>
+</html>
