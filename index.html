@@ -32,7 +32,12 @@
 </head>
 <body>
 <h1>مسجّل صوت — تجربة المرحلة 1</h1>
-<p class="sub">بيسجّل 3 ثواني سكوت (للقياس) وبعدها 10 ثواني حكي، بمعالجتين مختلفتين، وبيطلّع ملف لكل تسجيلة.</p>
+<p class="sub">بيسجّل 3 ثواني سكوت (للقياس) وبعدها 20 ثانية للحكي (اقرا جملتك واسكت بعدها لحد ما يخلص)، وبيطلّع ملف لكل تسجيلة.</p>
+<div class="card"><label for="src"><strong>المايك يلي عم تسجّل فيه:</strong></label>
+  <select id="src" style="font:inherit;width:100%;padding:12px;margin-top:8px;border-radius:10px">
+    <option value="phone">مايك الجوال نفسو (بلا سماعة)</option>
+    <option value="headset">سماعة سلكية بمايك</option>
+  </select></div>
 
 <div class="card">
   <button id="btnRaw">سجّل — معالجة مطفية</button>
@@ -65,9 +70,9 @@
 <script src="wavpack.js"></script>
 <script>
 "use strict";
-var PAGE_VERSION = "probe-2";
+var PAGE_VERSION = "probe-3";
 var COUNTDOWN_SECONDS = 3;   // سكوت للقياس (نفس عدّ audio_cli التنازلي: 3 ث)
-var SPEAK_SECONDS = 10;
+var SPEAK_SECONDS = 20;     // جمل طويلة (حتى ~15 ث) + ذيل سكوت بعدها لقياس الضجيج
 var BLOCK = 4096;            // عيّنات لكل رسالة من الـworklet
 
 var $ = function (id) { return document.getElementById(id); };
@@ -238,6 +243,7 @@ async function record(mode) {
     var meta = {
       page_version: PAGE_VERSION,
       mode: mode,
+      source: $("src").value,                     // phone | headset — مصدر المايك المصرَّح (بيتقارن بالاسم الفعلي للمايك)
       recorded_at: new Date().toISOString(),
       sample_rate: rate,
       countdown_seconds: COUNTDOWN_SECONDS,
@@ -293,7 +299,7 @@ function stamp(d) {
 function addTake(mode, wav, meta, quick, notRaw) {
   var blob = new Blob([wav], { type: "audio/wav" });
   var objUrl = URL.createObjectURL(blob);
-  var name = "probe-" + mode + "-" + stamp(new Date()) + ".wav";
+  var name = "probe-" + mode + "-" + meta.source + "-" + stamp(new Date()) + ".wav";
   var take = { name: name, downloaded: false };
   takes.push(take);
 
