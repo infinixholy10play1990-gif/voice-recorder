@@ -1,6 +1,6 @@
 /* sw.js — يخلّي الصفحة تشتغل بلا نت بعد أول فتحة. الشبكة أولاً (التحديثات بتوصل فوراً) والكاش احتياط بلا نت. */
-var CACHE = "probe-3";
-var FILES = ["./", "index.html", "wavpack.js"];
+var CACHE = "rec-1";
+var FILES = ["./", "index.html", "probe.html", "wavpack.js", "recorder_core.js"];
 
 self.addEventListener("install", function (event) {
   event.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES); }).then(function () { return self.skipWaiting(); }));

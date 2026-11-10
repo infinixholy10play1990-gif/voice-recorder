@@ -3,340 +3,515 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>مسجّل صوت</title>
+<title>مسجّل الجمل</title>
 <style>
   :root { --bg:#12161c; --fg:#e8ecf1; --muted:#9aa5b1; --card:#1c222b; --accent:#3b82f6; --warn:#f59e0b; --ok:#22c55e; --bad:#ef4444; }
   @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f5f7fa; --fg:#14181d; --muted:#5b6672; --card:#ffffff; } }
   * { box-sizing:border-box; }
   body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:17px/1.6 system-ui,"Segoe UI",Tahoma,sans-serif; }
   h1 { font-size:20px; margin:0 0 4px; }
-  p.sub { margin:0 0 16px; color:var(--muted); font-size:14px; }
+  .sub { margin:0 0 12px; color:var(--muted); font-size:14px; }
   .card { background:var(--card); border-radius:14px; padding:14px; margin-bottom:14px; }
-  button { font:inherit; font-weight:600; border:0; border-radius:12px; padding:16px; width:100%; color:#fff; background:var(--accent); margin-bottom:10px; }
-  button.alt { background:#6b7280; }
-  button.sm { width:auto; padding:8px 14px; font-size:15px; margin:0; }
+  button, .filebtn { display:block; font:inherit; font-weight:600; border:0; border-radius:12px; padding:16px; width:100%; color:#fff;
+                     background:var(--accent); margin-bottom:10px; text-align:center; cursor:pointer; }
+  button.alt { background:#6b7280; } button.ok { background:var(--ok); color:#06210f; } button.bad { background:var(--bad); }
+  button.sm { display:inline-block; width:auto; padding:8px 14px; font-size:15px; margin:0; }
   button:disabled { opacity:.45; }
-  .big { font-size:34px; font-weight:700; text-align:center; margin:6px 0; min-height:48px; }
-  .meter { height:14px; background:rgba(128,128,128,.25); border-radius:7px; overflow:hidden; direction:ltr; }
+  .row { display:flex; gap:10px; } .row > button { flex:1; }
+  .progress { font-size:15px; color:var(--muted); display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+  .side { color:var(--muted); font-size:16px; min-height:26px; }
+  .current { font-size:30px; line-height:1.55; font-weight:700; margin:10px 0; }
+  .status { font-size:26px; font-weight:700; text-align:center; min-height:40px; }
+  .meter { height:14px; background:rgba(128,128,128,.25); border-radius:7px; overflow:hidden; direction:ltr; margin:6px 0 12px; }
   .meter > div { height:100%; width:0; background:var(--ok); transition:width .08s; }
-  dl { margin:0; font-size:14px; display:grid; grid-template-columns:auto 1fr; gap:2px 12px; }
-  dt { color:var(--muted); } dd { margin:0; direction:ltr; text-align:left; word-break:break-all; }
-  .take { border-top:1px solid rgba(128,128,128,.3); padding-top:12px; margin-top:12px; }
-  .take audio { width:100%; margin:8px 0; }
-  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .msg { color:var(--warn); min-height:22px; font-size:15px; }
+  .err { color:var(--bad); font-size:15px; white-space:pre-wrap; }
+  audio { width:100%; margin:8px 0; }
+  .item { border-top:1px solid rgba(128,128,128,.3); padding:10px 0; }
+  .item .t { font-size:16px; }
   .tag { font-size:13px; padding:2px 8px; border-radius:20px; background:rgba(128,128,128,.25); }
   .tag.warn { background:var(--warn); color:#000; }
-  #msg { color:var(--warn); min-height:24px; font-size:15px; }
-  #log { margin:8px 0 0; font:12px/1.5 monospace; direction:ltr; text-align:left; white-space:pre-wrap; word-break:break-all; color:var(--muted); }
+  [hidden] { display:none !important; }
 </style>
 </head>
 <body>
-<h1>مسجّل صوت — تجربة المرحلة 1</h1>
-<p class="sub">بيسجّل 3 ثواني سكوت (للقياس) وبعدها 20 ثانية للحكي (اقرا جملتك واسكت بعدها لحد ما يخلص)، وبيطلّع ملف لكل تسجيلة.</p>
-<div class="card"><label for="src"><strong>المايك يلي عم تسجّل فيه:</strong></label>
-  <select id="src" style="font:inherit;width:100%;padding:12px;margin-top:8px;border-radius:10px">
-    <option value="phone">مايك الجوال نفسو (بلا سماعة)</option>
-    <option value="headset">سماعة سلكية بمايك</option>
-  </select></div>
 
-<div class="card">
-  <button id="btnRaw">سجّل — معالجة مطفية</button>
-  <button id="btnProc" class="alt">سجّل — معالجة مشغّلة (الافتراضي)</button>
-  <div class="big" id="status">جاهز</div>
-  <div class="meter"><div id="level"></div></div>
-  <div id="msg"></div>
-</div>
+<!-- ============================== البداية -->
+<section id="home">
+  <h1>مسجّل الجمل</h1>
+  <p class="sub">اختار ملف الكلام (نفس ملف <span dir="ltr">.txt</span> يلي بتسجّل منه عاللابتوب)، وثبّت الجوال بمكانه، وابدأ.</p>
+  <div class="card">
+    <label class="filebtn" for="file">اختار ملف الكلام</label>
+    <input type="file" id="file" accept=".txt,text/plain" hidden>
+    <div class="err" id="homeErr"></div>
+  </div>
+  <div class="card" id="resumeCard" hidden>
+    <strong>جلسات محفوظة بالجوال</strong>
+    <div id="resumeList"></div>
+  </div>
+  <div class="card"><div class="sub" style="margin:0">نسخة الصفحة: <span id="ver" dir="ltr"></span> · بلا نت: <span id="offline">...</span></div></div>
+</section>
 
-<div class="card" id="settingsCard" hidden>
-  <strong>إعدادات المايك يلي رجّعها الجوال فعلياً</strong>
-  <dl id="settings"></dl>
-</div>
+<!-- ============================== التسجيل -->
+<section id="rec" hidden>
+  <div class="progress"><span id="prog"></span><span id="approvedCount"></span></div>
+  <div class="card">
+    <div class="side" id="prevLine"></div>
+    <div class="current" id="curLine"></div>
+    <div class="side" id="nextLine"></div>
+  </div>
+  <div class="card">
+    <div class="status" id="status">جاهز</div>
+    <div class="meter"><div id="level"></div></div>
+    <div class="msg" id="msg"></div>
+    <div id="idleBox">
+      <button id="btnRecord">سجّل</button>
+      <div class="row"><button class="alt" id="btnPostpone">أجّل لآخر الدور</button><button class="alt" id="btnPause">وقّف الجلسة</button></div>
+    </div>
+    <div id="liveBox" hidden>
+      <div class="row"><button id="btnStop">خلصت — وقّف</button><button class="alt" id="btnCancel">إلغاء</button></div>
+    </div>
+    <div id="reviewBox" hidden>
+      <audio id="player" controls></audio>
+      <div class="sub" id="reviewInfo"></div>
+      <div class="row"><button class="ok" id="btnApprove">اعتماد</button><button class="bad" id="btnRedo">أعد</button></div>
+    </div>
+  </div>
+  <button class="alt" id="btnExportMid">نزّل يلي سجّلتو لهلق</button>
+</section>
 
-<div class="card">
-  <strong>سجل التشخيص</strong>
-  <pre id="log"></pre>
-</div>
-
-<div id="takes"></div>
-
-<div class="card">
-  <dl>
-    <dt>نسخة الصفحة</dt><dd id="ver"></dd>
-    <dt>شغّالة بلا نت؟</dt><dd id="offline">...</dd>
-  </dl>
-  <p class="sub" style="margin:10px 0 0">لا تسكّر الصفحة قبل ما تنزّل كل تسجيلة — التسجيلات بالذاكرة بس.</p>
-</div>
+<!-- ============================== النهاية -->
+<section id="done" hidden>
+  <h1 id="doneTitle">خلصت الجلسة</h1>
+  <p class="sub" id="doneSub"></p>
+  <div class="card">
+    <button id="btnExport">نزّل ملف الجلسة</button>
+    <div class="sub" id="exportInfo">بينحفظ بمجلد التنزيلات (Download). بالقاعة: وصّل الجوال بالكبل وانسخ الملف للابتوب.</div>
+  </div>
+  <div class="card">
+    <strong>الجمل المعتمدة</strong> <span class="sub">(بتقدر تسمع أي وحدة وتعيدها)</span>
+    <div id="approvedList"></div>
+  </div>
+  <button class="alt" id="btnHome">رجوع للبداية</button>
+</section>
 
 <script src="wavpack.js"></script>
+<script src="recorder_core.js"></script>
 <script>
 "use strict";
-var PAGE_VERSION = "probe-3";
-var COUNTDOWN_SECONDS = 3;   // سكوت للقياس (نفس عدّ audio_cli التنازلي: 3 ث)
-var SPEAK_SECONDS = 20;     // جمل طويلة (حتى ~15 ث) + ذيل سكوت بعدها لقياس الضجيج
-var BLOCK = 4096;            // عيّنات لكل رسالة من الـworklet
-
+var PAGE_VERSION = "rec-1";
+var BLOCK = 4096;
+var DB_NAME = "phone-recorder", DB_STORE = "sessions";
+var C = RecorderCore;
 var $ = function (id) { return document.getElementById(id); };
-document.getElementById("ver").textContent = PAGE_VERSION;
+$("ver").textContent = PAGE_VERSION;
 
-var takes = [];
-var busy = false;
+// ------------------------------------------------------------------ حالة الجلسة
+// session: {id (بصمة ملف الكلام), scriptName, scriptSha256, scriptText, cues, unique: [index...], dup: {index: نفس_index},
+//           approved: {index: {wav: ArrayBuffer, meta}}, queue: [index...], createdAt, exportedAt, attempts: {index: n}}
+var session = null;
+var attempt = null;          // المحاولة الجارية: {engine, ctx, stream, node, gain, url, cancelled}
+var pendingTake = null;      // محاولة خلصت وناطرة اعتماد/إعادة
+var wakeLock = null;
 
-// الـworklet كنص (Blob) حتى تضل الصفحة ملفين بس ومضمونة بالكاش
+function show(id) { ["home", "rec", "done"].forEach(function (s) { $(s).hidden = s !== id; }); window.scrollTo(0, 0); }
+function setMsg(t) { $("msg").textContent = t || ""; }
+// عزل اتجاه (LRI…PDI): بلاه «−7.2 dBFS» بينعرض «dBFS 7.2-» جوّا سطر عربي (مقيس على لقطة الشاشة)
+function fmtDb(x) { return "⁦" + (isFinite(x) ? x.toFixed(1) + " dBFS" : "-∞") + "⁩"; }
+function stamp(d) {
+  function p(n) { return String(n).padStart(2, "0"); }
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "T" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+}
+function hex(buf) { return Array.prototype.map.call(new Uint8Array(buf), function (b) { return b.toString(16).padStart(2, "0"); }).join(""); }
+
+// ------------------------------------------------------------------ التخزين بالجوال (IndexedDB) — بيحمي من سكّرة الصفحة
+var dbPromise = null;
+function db() {
+  if (!dbPromise) {
+    dbPromise = new Promise(function (resolve, reject) {
+      try {
+        var req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = function () { req.result.createObjectStore(DB_STORE, { keyPath: "id" }); };
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error); };
+      } catch (e) { reject(e); }
+    });
+  }
+  return dbPromise;
+}
+function dbDo(mode, fn) {
+  return db().then(function (d) {
+    return new Promise(function (resolve, reject) {
+      var tx = d.transaction(DB_STORE, mode), store = tx.objectStore(DB_STORE), out;
+      out = fn(store);
+      tx.oncomplete = function () { resolve(out && out.result); };
+      tx.onerror = function () { reject(tx.error); };
+      tx.onabort = function () { reject(tx.error || new Error("انلغت عملية التخزين")); };
+    });
+  });
+}
+var storageOk = true;
+function saveSession() {
+  return dbDo("readwrite", function (s) { return s.put(session); }).then(function () { storageOk = true; })
+    .catch(function (e) { storageOk = false; setMsg("تنبيه: الجلسة ما انحفظت بالجوال (" + (e && e.message) + ") — نزّلها قبل ما تسكّر الصفحة"); });
+}
+function listSessions() { return dbDo("readonly", function (s) { return s.getAll(); }).catch(function () { return []; }); }
+function deleteSession(id) { return dbDo("readwrite", function (s) { return s.delete(id); }); }
+
+// ------------------------------------------------------------------ البداية
+function renderResume() {
+  listSessions().then(function (all) {
+    all = (all || []).filter(function (s) { return s && s.cues; });
+    $("resumeCard").hidden = !all.length;
+    var box = $("resumeList"); box.innerHTML = "";
+    all.sort(function (a, b) { return (b.updatedAt || "").localeCompare(a.updatedAt || ""); });
+    all.forEach(function (s) {
+      var n = Object.keys(s.approved).length;
+      var div = document.createElement("div"); div.className = "item";
+      var t = document.createElement("div"); t.className = "t";
+      t.textContent = s.scriptName + " — معتمد " + n + " من " + s.unique.length + (s.exportedAt ? " · آخر تنزيل " + s.exportedAt.slice(0, 16).replace("T", " ") : " · ما تنزّلت");
+      var row = document.createElement("div"); row.className = "row"; row.style.marginTop = "8px";
+      var go = document.createElement("button"); go.className = "sm"; go.textContent = "كمّل";
+      go.onclick = function () { session = s; startSession(); };
+      var del = document.createElement("button"); del.className = "sm alt"; del.textContent = "امسحها من الجوال";
+      del.onclick = function () {
+        var warn = s.exportedAt ? "" : " (⚠️ ما نزّلتها ولا مرة!)";
+        if (confirm("أكيد بدك تمسح جلسة «" + s.scriptName + "» من الجوال؟ التسجيلات يلي فيها بتروح" + warn)) deleteSession(s.id).then(renderResume);
+      };
+      row.appendChild(go); row.appendChild(del);
+      div.appendChild(t); div.appendChild(row); box.appendChild(div);
+    });
+  });
+}
+
+$("file").onchange = async function () {
+  $("homeErr").textContent = "";
+  var f = this.files && this.files[0];
+  this.value = "";
+  if (!f) return;
+  try {
+    var bytes = new Uint8Array(await f.arrayBuffer());
+    if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+      throw new Error("الملف محفوظ بـBOM — احفظه من جديد UTF-8 بلا BOM");
+    }
+    var text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    var cues = C.parseScript(text);
+    var sha = hex(await crypto.subtle.digest("SHA-256", bytes));
+    var existing = (await listSessions()).filter(function (s) { return s.id === sha; })[0];
+    if (existing) {
+      session = existing;
+    } else {
+      var unique = [], dup = {}, firstByText = {};
+      cues.forEach(function (c) {
+        if (firstByText[c.text] !== undefined) dup[c.index] = firstByText[c.text];
+        else { firstByText[c.text] = c.index; unique.push(c.index); }
+      });
+      session = { id: sha, scriptName: f.name, scriptSha256: sha, scriptText: text, cues: cues, unique: unique, dup: dup,
+                  approved: {}, attempts: {}, queue: unique.slice(), createdAt: new Date().toISOString(), exportedAt: null };
+      await saveSession();
+    }
+    startSession();
+  } catch (e) {
+    $("homeErr").textContent = "ما قدرت إقرا الملف: " + ((e && e.message) || e);
+  }
+};
+
+// ------------------------------------------------------------------ التسجيل
+function cueByIndex(i) { return session.cues[i - 1]; }
+function currentIndex() { return session.queue[0]; }
+
+function startSession() {
+  requestWake();
+  if (!session.queue.length) { showDone(); return; }
+  show("rec");
+  renderCue();
+}
+
+function renderCue() {
+  var i = currentIndex();
+  var cue = cueByIndex(i);
+  var pos = session.unique.indexOf(i);
+  $("prog").textContent = "جملة " + (pos + 1) + " من " + session.unique.length + (cue.name ? " · " + cue.name : "");
+  $("approvedCount").textContent = "معتمد " + Object.keys(session.approved).length;
+  var prev = session.unique[pos - 1], next = session.unique[pos + 1];
+  $("prevLine").textContent = prev ? "قبلها: " + cueByIndex(prev).text : "";
+  $("curLine").textContent = cue.text;
+  $("nextLine").textContent = next ? "بعدها: " + cueByIndex(next).text : "";
+  $("status").textContent = "جاهز";
+  setMsg(storageOk ? "" : $("msg").textContent);
+  setBox("idle");
+}
+
+function setBox(which) {
+  $("idleBox").hidden = which !== "idle";
+  $("liveBox").hidden = which !== "live";
+  $("reviewBox").hidden = which !== "review";
+}
+
+function constraints() {
+  // معالجة المتصفّح كلها مطفية (قرار المرحلة 1: «مشغّلة» انرفضت بالاستماع الأعمى)
+  return { audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false, voiceIsolation: false } };
+}
+
+async function startAttempt() {
+  if (attempt) return;
+  setMsg("");
+  var cue = cueByIndex(currentIndex());
+  var silence = C.silenceSecondsForText(cue.text);
+  var a = { cancelled: false, ctx: null, stream: null, node: null, gain: null, url: null, engine: null, settings: null, label: "" };
+  attempt = a;
+  setBox("live");
+  try {
+    a.ctx = new (window.AudioContext || window.webkitAudioContext)();     // بنفس لمسة الزر (سياسة التشغيل)
+    a.stream = await navigator.mediaDevices.getUserMedia(constraints());
+    if (a.ctx.state === "suspended") await a.ctx.resume();
+    var track = a.stream.getAudioTracks()[0];
+    a.settings = track.getSettings ? track.getSettings() : {};
+    a.label = track.label || "";
+    var ignored = ["echoCancellation", "noiseSuppression", "autoGainControl"].filter(function (k) { return a.settings[k] !== false; });
+    if (ignored.length) setMsg("تنبيه: الجوال ما طفّى " + ignored.join("، ") + " — الصوت مو خام");
+    a.rawHonored = !ignored.length;
+    var rate = a.ctx.sampleRate;
+    a.engine = new C.ClipEngine(rate, silence, WavPack.floatToInt16, { aboveFloorDb: C.PHONE_DETECT_ABOVE_FLOOR_DB });
+    var useWorklet = typeof AudioWorkletNode !== "undefined" && !!a.ctx.audioWorklet;
+    if (useWorklet) {
+      try {
+        a.url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: "application/javascript" }));
+        await a.ctx.audioWorklet.addModule(a.url);
+      } catch (e) { useWorklet = false; }
+    }
+    await new Promise(function (resolve, reject) {
+      a.finish = resolve;
+      var src = a.ctx.createMediaStreamSource(a.stream);
+      a.gain = a.ctx.createGain(); a.gain.gain.value = 0;
+      var got = false;
+      var watchdog = setTimeout(function () { if (!got) reject(new Error("ما وصل صوت من المايك بعد 4 ث")); }, 4000);
+      function onBlock(block) {
+        if (a.cancelled || a.done) return;
+        if (!got) { got = true; clearTimeout(watchdog); }
+        $("level").style.width = Math.max(0, Math.min(100, (WavPack.dbfsRms(block) + 60) / 60 * 100)) + "%";
+        var finished = a.engine.push(block);
+        var e = a.engine;
+        if (e.phase === "countdown") $("status").textContent = "سكوت… " + Math.max(1, Math.ceil((e.countdownChunks - e.countdown.length) * e.chunkSeconds));
+        else if (e.phase === "recording") $("status").textContent = e.detector && e.detector.started ? "عم سجّل… (بيوقف لحالو لما تسكت)" : "احكي هلق";
+        if (finished) { a.done = true; resolve(); }
+      }
+      if (useWorklet) {
+        a.node = new AudioWorkletNode(a.ctx, "rec");
+        a.node.port.onmessage = function (ev) { onBlock(ev.data); };
+        a.node.onprocessorerror = function () { reject(new Error("عطل بمعالج الصوت")); };
+      } else {
+        a.node = a.ctx.createScriptProcessor(BLOCK, 1, 1);
+        a.node.onaudioprocess = function (ev) { onBlock(new Float32Array(ev.inputBuffer.getChannelData(0))); };
+      }
+      src.connect(a.node); a.node.connect(a.gain); a.gain.connect(a.ctx.destination);
+      $("status").textContent = "سكوت… " + C.COUNTDOWN_SECONDS;
+    });
+    if (a.cancelled) return;
+    finishAttempt(a, a.manual === true);
+  } catch (err) {
+    if (!a.cancelled) {
+      setMsg(describeError(err));
+      $("status").textContent = "ما زبطت";
+      setBox("idle");
+    }
+    await closeAttempt(a);
+  }
+}
+
 var WORKLET_SRC =
   "class Rec extends AudioWorkletProcessor {" +
   "  constructor(){ super(); this.buf = new Float32Array(" + BLOCK + "); this.n = 0; }" +
-  "  process(inputs){" +
-  "    var ch = inputs[0] && inputs[0][0];" +
-  "    if (!ch) return true;" +
-  "    for (var i = 0; i < ch.length; i++) {" +
-  "      this.buf[this.n++] = ch[i];" +
-  "      if (this.n === this.buf.length) { this.port.postMessage(this.buf.slice(0)); this.n = 0; }" +
-  "    }" +
-  "    return true;" +
-  "  }" +
-  "}" +
+  "  process(inputs){ var ch = inputs[0] && inputs[0][0]; if (!ch) return true;" +
+  "    for (var i = 0; i < ch.length; i++) { this.buf[this.n++] = ch[i];" +
+  "      if (this.n === this.buf.length) { this.port.postMessage(this.buf.slice(0)); this.n = 0; } }" +
+  "    return true; } }" +
   "registerProcessor('rec', Rec);";
-
-function constraintsFor(mode) {
-  // raw: كل معالجة المتصفّح مطفية. processed: صريحة مشغّلة = اللي بيشوفه أي تطبيق تسجيل عادي
-  var on = mode === "processed";
-  return { audio: { channelCount: 1, echoCancellation: on, noiseSuppression: on, autoGainControl: on, voiceIsolation: on } };
-}
-
-function setMsg(text) { $("msg").textContent = text || ""; }
-
-var t0 = performance.now();
-function log(text) {
-  var line = ((performance.now() - t0) / 1000).toFixed(1) + "s  " + text;
-  $("log").textContent += line + String.fromCharCode(10);
-}
-log("secure=" + window.isSecureContext + " worklet=" + (typeof AudioWorkletNode !== "undefined") +
-    " gUM=" + !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
-log("UA " + navigator.userAgent);
-
-function setBusy(flag) {
-  busy = flag;
-  $("btnRaw").disabled = flag;
-  $("btnProc").disabled = flag;
-}
-
-function fmtDb(x) { return isFinite(x) ? x.toFixed(1) + " dBFS" : "-∞"; }
-
-function showSettings(info) {
-  var dl = $("settings");
-  dl.innerHTML = "";
-  Object.keys(info).forEach(function (k) {
-    var dt = document.createElement("dt"); dt.textContent = k;
-    var dd = document.createElement("dd"); dd.textContent = String(info[k]);
-    dl.appendChild(dt); dl.appendChild(dd);
-  });
-  $("settingsCard").hidden = false;
-}
-
-async function record(mode) {
-  if (busy) return;
-  setBusy(true);
-  setMsg("");
-  var ctx = null, stream = null, node = null, gain = null, url = null;
-  try {
-    // الـAudioContext لازم ينولد بنفس لمسة الزر (سياسة التشغيل التلقائي) — قبل أي await
-    ctx = new (window.AudioContext || window.webkitAudioContext)();
-    log("1 AudioContext انعمل، الحالة=" + ctx.state + "، المعدّل=" + ctx.sampleRate);
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error("هالمتصفّح ما بيعطي صلاحية المايك (لازم صفحة HTTPS)");
-    }
-    stream = await navigator.mediaDevices.getUserMedia(constraintsFor(mode));
-    log("2 المايك انفتح (الصلاحية انمنحت)");
-    if (ctx.state === "suspended") await ctx.resume();
-    log("3 الحالة بعد resume=" + ctx.state);
-    var useWorklet = !!(ctx.audioWorklet && window.AudioWorkletNode);
-    if (useWorklet) {
-      try {
-        url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: "application/javascript" }));
-        await ctx.audioWorklet.addModule(url);
-        log("4 الـAudioWorklet تحمّل");
-      } catch (e) {
-        useWorklet = false;
-        log("4 الـAudioWorklet فشل (" + ((e && e.message) || e) + ") — بنستعمل الطريقة البديلة");
-      }
-    } else {
-      log("4 ما في AudioWorklet بهالمتصفّح — بنستعمل الطريقة البديلة");
-    }
-
-    var track = stream.getAudioTracks()[0];
-    var s = track.getSettings ? track.getSettings() : {};
-    var caps = track.getCapabilities ? track.getCapabilities() : {};
-    var rate = ctx.sampleRate;
-    var info = {
-      "الوضع": mode === "raw" ? "معالجة مطفية" : "معالجة مشغّلة",
-      "معدّل العيّنات": rate + " Hz",
-      "echoCancellation": s.echoCancellation,
-      "noiseSuppression": s.noiseSuppression,
-      "autoGainControl": s.autoGainControl,
-      "voiceIsolation": s.voiceIsolation,
-      "channelCount": s.channelCount,
-      "المايك": track.label || "(بلا اسم)",
-    };
-    showSettings(info);
-    // طلب المعالجة المطفية لا يضمن إنو الجهاز طفّاها — بنحذّر لو الجوال ما نفّذ الطلب
-    var ignored = [];
-    if (mode === "raw") {
-      ["echoCancellation", "noiseSuppression", "autoGainControl"].forEach(function (k) {
-        if (s[k] !== false) ignored.push(k + "=" + s[k]);
-      });
-    }
-    if (ignored.length) setMsg("تنبيه: الجوال ما طفّى: " + ignored.join("، ") + " — التسجيلة مو خام فعلياً");
-
-    var total = Math.round(rate * (COUNTDOWN_SECONDS + SPEAK_SECONDS));
-    var chunks = [];
-    var count = 0;
-    var firstAt = null;
-    var peakAll = 0;
-
-    await new Promise(function (resolve, reject) {
-      var src = ctx.createMediaStreamSource(stream);
-      gain = ctx.createGain(); gain.gain.value = 0;      // العقدة لازم تكون موصولة بالمخرج حتى ينسحب منها صوت
-      var finished = false;
-      function onBlock(block) {
-        if (finished) return;                     // كتل متأخرة بعد الاكتمال ما بتلمس العرض
-        if (firstAt === null) { firstAt = performance.now(); log("5 وصل أول صوت من المايك"); clearTimeout(watchdog); }
-        chunks.push(block);
-        count += block.length;
-        var dbLevel = WavPack.dbfsRms(block);
-        for (var i = 0; i < block.length; i++) { var a = Math.abs(block[i]); if (a > peakAll) peakAll = a; }
-        $("level").style.width = Math.max(0, Math.min(100, (dbLevel + 60) / 60 * 100)) + "%";
-        $("level").style.background = peakAll >= 0.999 ? "var(--bad)" : "var(--ok)";
-        var t = count / rate;
-        if (t < COUNTDOWN_SECONDS) $("status").textContent = "سكوت… " + Math.ceil(COUNTDOWN_SECONDS - t);
-        else $("status").textContent = "احكي… " + Math.max(0, Math.ceil(COUNTDOWN_SECONDS + SPEAK_SECONDS - t));
-        if (count >= total) { finished = true; resolve(); }
-      }
-      if (useWorklet) {
-        node = new AudioWorkletNode(ctx, "rec");
-        node.onprocessorerror = function () { reject(new Error("عطل بمعالج الصوت")); };
-        node.port.onmessage = function (e) { onBlock(e.data); };
-      } else {
-        // طريقة بديلة قديمة (ScriptProcessor) للمتصفّحات يلي ما بتشغّل الـworklet
-        node = ctx.createScriptProcessor(BLOCK, 1, 1);
-        node.onaudioprocess = function (e) { onBlock(new Float32Array(e.inputBuffer.getChannelData(0))); };
-      }
-      src.connect(node); node.connect(gain); gain.connect(ctx.destination);
-      $("status").textContent = "سكوت… " + COUNTDOWN_SECONDS;
-      // حارس: لو ما وصل ولا صوت خلال 4 ث، ما بنضل معلّقين — بنطلّع السبب
-      var tr = stream.getAudioTracks()[0];
-      var watchdog = setTimeout(function () {
-        reject(new Error("ما وصل صوت من المايك بعد 4 ث (ctx=" + ctx.state + "، track.readyState=" + tr.readyState +
-                         "، muted=" + tr.muted + "، enabled=" + tr.enabled + "، worklet=" + useWorklet + ")"));
-      }, 4000);
-    });
-    var wallSeconds = (performance.now() - firstAt) / 1000;
-
-    // تجميع العيّنات وقصّها لطول مضبوط (الكتلة الأخيرة ممكن تزيد)
-    var all = new Float32Array(total);
-    var off = 0;
-    for (var c = 0; c < chunks.length && off < total; c++) {
-      var part = chunks[c].subarray(0, Math.min(chunks[c].length, total - off));
-      all.set(part, off); off += part.length;
-    }
-    var pcm = WavPack.floatToInt16(all);
-    var cdSamples = Math.round(rate * COUNTDOWN_SECONDS);
-    var meta = {
-      page_version: PAGE_VERSION,
-      mode: mode,
-      source: $("src").value,                     // phone | headset — مصدر المايك المصرَّح (بيتقارن بالاسم الفعلي للمايك)
-      recorded_at: new Date().toISOString(),
-      sample_rate: rate,
-      countdown_seconds: COUNTDOWN_SECONDS,
-      speak_seconds: SPEAK_SECONDS,
-      samples: pcm.length,
-      wall_seconds: wallSeconds,                  // الزمن الفعلي مقابل samples/rate: فرق كبير = عيّنات انفقدت
-      requested_constraints: constraintsFor(mode).audio,
-      track_settings: s,
-      track_capabilities: {
-        echoCancellation: caps.echoCancellation, noiseSuppression: caps.noiseSuppression, autoGainControl: caps.autoGainControl,
-      },
-      track_label: track.label,
-      base_latency: ctx.baseLatency,
-      user_agent: navigator.userAgent,
-    };
-    var wav = WavPack.encodeWav(pcm, rate, meta);
-    var quick = {
-      noise: WavPack.dbfsRms(all.subarray(0, cdSamples)),
-      speech: WavPack.dbfsRms(all.subarray(cdSamples)),
-      peak: WavPack.peakDbfs(all),
-      clipped: WavPack.countClipped(pcm),
-    };
-    addTake(mode, wav, meta, quick, ignored.length > 0);
-    $("status").textContent = "تمّت";
-  } catch (err) {
-    log("خطأ: " + (err && err.name) + " — " + ((err && err.message) || err));
-    setMsg(describeError(err));
-    $("status").textContent = "ما زبطت";
-  } finally {
-    try { if (node) node.disconnect(); } catch (e) {}
-    try { if (gain) gain.disconnect(); } catch (e) {}
-    try { if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
-    try { if (ctx) await ctx.close(); } catch (e) {}
-    if (url) URL.revokeObjectURL(url);
-    $("level").style.width = "0";
-    setBusy(false);
-  }
-}
 
 function describeError(err) {
   var name = err && err.name;
   if (name === "NotAllowedError") return "المايك محجوب — اسمح فيه من إعدادات الموقع بالمتصفّح";
   if (name === "NotFoundError") return "ما في مايك";
   if (name === "NotReadableError") return "المايك مشغول بتطبيق تاني";
+  if (name === "MicrophoneSilent") return err.message;
   return "خطأ: " + ((err && err.message) || err);
 }
 
-function stamp(d) {
-  function p(n) { return String(n).padStart(2, "0"); }
-  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "T" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+async function closeAttempt(a) {
+  try { if (a.node) a.node.disconnect(); } catch (e) {}
+  try { if (a.gain) a.gain.disconnect(); } catch (e) {}
+  try { if (a.stream) a.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+  try { if (a.ctx) await a.ctx.close(); } catch (e) {}
+  if (a.url) URL.revokeObjectURL(a.url);
+  $("level").style.width = "0";
+  if (attempt === a) attempt = null;
 }
 
-function addTake(mode, wav, meta, quick, notRaw) {
-  var blob = new Blob([wav], { type: "audio/wav" });
-  var objUrl = URL.createObjectURL(blob);
-  var name = "probe-" + mode + "-" + meta.source + "-" + stamp(new Date()) + ".wav";
-  var take = { name: name, downloaded: false };
-  takes.push(take);
-
-  var div = document.createElement("div"); div.className = "take";
-  var head = document.createElement("div"); head.className = "row";
-  var tag = document.createElement("span"); tag.className = "tag" + (notRaw ? " warn" : "");
-  tag.textContent = (mode === "raw" ? "مطفية" : "مشغّلة") + (notRaw ? " (ما انطفت فعلياً)" : "");
-  var label = document.createElement("span"); label.textContent = name; label.style.direction = "ltr";
-  head.appendChild(tag); head.appendChild(label);
-  var audio = document.createElement("audio"); audio.controls = true; audio.src = objUrl;
-  var stats = document.createElement("div"); stats.className = "sub"; stats.style.fontSize = "14px";
-  stats.textContent = "سكوت " + fmtDb(quick.noise) + " · حكي " + fmtDb(quick.speech) + " · ذروة " + fmtDb(quick.peak) +
-    " · مقصوص " + quick.clipped + " عيّنة · " + meta.sample_rate + " Hz";
-  var btn = document.createElement("button"); btn.className = "sm"; btn.textContent = "نزّل الملف";
-  btn.onclick = function () {
-    var a = document.createElement("a"); a.href = objUrl; a.download = name;
-    document.body.appendChild(a); a.click(); a.remove();
-    take.downloaded = true; btn.textContent = "نزّلته ✓";
+function finishAttempt(a, manual) {
+  var e = a.engine;
+  var result;
+  try {
+    result = e.finish(manual);
+  } catch (err) {
+    setMsg(describeError(err));
+    $("status").textContent = "ما زبطت — جرّب كمان مرة";
+    setBox("idle");
+    closeAttempt(a);
+    return;
+  }
+  closeAttempt(a);
+  var idx = currentIndex(), cue = cueByIndex(idx);
+  session.attempts[idx] = (session.attempts[idx] || 0) + 1;
+  var floats = new Float32Array(result.samples.length);
+  for (var i = 0; i < floats.length; i++) floats[i] = result.samples[i] / WavPack.FULL_SCALE;
+  var meta = {
+    page_version: PAGE_VERSION, kind: "phone-session-clip",
+    script_sha256: session.scriptSha256, cue_index: idx, cue_name: cue.name, text: cue.text,
+    recorded_at: new Date().toISOString(), sample_rate: e.rate, samples: result.samples.length,
+    chunk_size: e.chunkSize, countdown_seconds: C.COUNTDOWN_SECONDS, silence_seconds: e.silenceSeconds,
+    floor_db: result.floorDb, above_floor_db: e.aboveFloorDb, stop_reason: result.reason, last_speech_chunk: result.lastSpeechChunk,
+    attempt: session.attempts[idx], raw_honored: a.rawHonored, track_settings: a.settings, track_label: a.label,
+    peak_dbfs: WavPack.peakDbfs(floats), speech_dbfs: WavPack.dbfsRms(floats), clipped: WavPack.countClipped(result.samples),
+    user_agent: navigator.userAgent,
   };
-  div.appendChild(head); div.appendChild(audio); div.appendChild(stats); div.appendChild(btn);
-  $("takes").insertBefore(div, $("takes").firstChild);
+  var wav = WavPack.encodeWav(result.samples, e.rate, meta);
+  pendingTake = { index: idx, samples: result.samples, meta: meta };
+  var url = URL.createObjectURL(new Blob([wav], { type: "audio/wav" }));
+  var player = $("player");
+  if (player.dataset.url) URL.revokeObjectURL(player.dataset.url);
+  player.dataset.url = url; player.src = url;
+  var why = { silence: "وقف لحالو بعد السكتة", manual: "وقّفتو بإيدك", max: "وصل السقف (دقيقتين)" }[result.reason];
+  var warn = [];
+  if (meta.clipped > 0) warn.push("في " + meta.clipped + " عيّنة مقصوصة (الصوت عالي كتير — بعّد الجوال شوي)");
+  if (!a.rawHonored) warn.push("الصوت مو خام");
+  $("reviewInfo").textContent = why + " · " + (meta.samples / e.rate).toFixed(1) + " ث · ذروة " + fmtDb(meta.peak_dbfs) +
+    (warn.length ? " · ⚠️ " + warn.join("، ") : "");
+  $("status").textContent = "اسمع وقرّر";
+  setBox("review");
+  player.play().catch(function () {});
 }
+
+$("btnRecord").onclick = function () { startAttempt(); };
+$("btnStop").onclick = function () {
+  var a = attempt;
+  if (!a || !a.engine) return;
+  if (a.engine.phase === "countdown") { setMsg("لسا بالعدّ — استنى «احكي هلق»"); return; }
+  a.manual = true; a.done = true;
+  if (a.finish) a.finish();
+};
+$("btnCancel").onclick = function () {
+  var a = attempt;
+  if (!a) return;
+  a.cancelled = true;
+  closeAttempt(a);
+  $("status").textContent = "انلغت المحاولة";
+  setBox("idle");
+};
+$("btnApprove").onclick = async function () {
+  if (!pendingTake) return;
+  var t = pendingTake; pendingTake = null;
+  t.meta.approved_at = new Date().toISOString();
+  var wav = WavPack.encodeWav(t.samples, t.meta.sample_rate, t.meta);      // من جديد حتى وقت الاعتماد يدخل اللائحة
+  session.approved[t.index] = { wav: wav.buffer, meta: t.meta };
+  session.queue = session.queue.filter(function (i) { return i !== t.index; });
+  session.updatedAt = new Date().toISOString();
+  $("player").pause();
+  await saveSession();
+  if (!session.queue.length) showDone(); else renderCue();
+};
+$("btnRedo").onclick = function () { pendingTake = null; $("player").pause(); renderCue(); startAttempt(); };
+$("btnPostpone").onclick = function () {
+  if (session.queue.length < 2) { setMsg("ما في جمل تانية — هي الأخيرة"); return; }
+  session.queue.push(session.queue.shift());
+  saveSession(); renderCue();
+};
+$("btnPause").onclick = function () { saveSession(); showDone(true); };
+$("btnExportMid").onclick = function () { exportSession(); };
+
+// ------------------------------------------------------------------ النهاية والتنزيل
+function showDone(paused) {
+  show("done");
+  var n = Object.keys(session.approved).length, total = session.unique.length;
+  $("doneTitle").textContent = n === total ? "خلصت الجلسة" : "الجلسة موقوفة";
+  $("doneSub").textContent = "معتمد " + n + " من " + total + (n < total ? " — لما ترجع افتح الصفحة واختار «كمّل»" : "");
+  var box = $("approvedList"); box.innerHTML = "";
+  session.unique.forEach(function (i) {
+    var rec = session.approved[i];
+    if (!rec) return;
+    var div = document.createElement("div"); div.className = "item";
+    var t = document.createElement("div"); t.className = "t"; t.textContent = cueByIndex(i).text;
+    var au = document.createElement("audio"); au.controls = true; au.preload = "none";
+    au.src = URL.createObjectURL(new Blob([rec.wav], { type: "audio/wav" }));
+    var redo = document.createElement("button"); redo.className = "sm alt"; redo.textContent = "أعد هالجملة";
+    redo.onclick = function () {
+      if (!confirm("بدك تعيد تسجيل هالجملة؟ التسجيل المعتمد بيضل لحد ما تعتمد غيرو")) return;
+      session.queue = [i].concat(session.queue.filter(function (q) { return q !== i; }));
+      startSession();
+    };
+    div.appendChild(t); div.appendChild(au); div.appendChild(redo); box.appendChild(div);
+  });
+}
+
+function exportSession() {
+  var approvedIdx = session.unique.filter(function (i) { return session.approved[i]; });
+  if (!approvedIdx.length) { alert("لسا ما في ولا جملة معتمدة"); return; }
+  var enc = new TextEncoder();
+  var entries = [];
+  var clips = approvedIdx.map(function (i) {
+    var rec = session.approved[i];
+    var file = "clips/" + String(i).padStart(4, "0") + ".wav";
+    entries.push({ name: file, data: new Uint8Array(rec.wav) });
+    var m = rec.meta;
+    return { index: i, name: m.cue_name, text: m.text, file: file, sample_rate: m.sample_rate, samples: m.samples,
+             duration: m.samples / m.sample_rate, stop_reason: m.stop_reason, attempt: m.attempt, raw_honored: m.raw_honored,
+             recorded_at: m.recorded_at, approved_at: m.approved_at, peak_dbfs: m.peak_dbfs, clipped: m.clipped };
+  });
+  var now = new Date();
+  var manifest = {
+    format: "phone-session-1", page_version: PAGE_VERSION, exported_at: now.toISOString(),
+    script: { file_name: session.scriptName, sha256: session.scriptSha256, cue_count: session.cues.length, unique_count: session.unique.length },
+    duplicates: session.dup,                  // رقم جملة مكرَّرة ⟵ رقم أول ظهور لنفس النص (ما بتنسجّل مرتين)
+    clips: clips,
+    missing: session.unique.filter(function (i) { return !session.approved[i]; }),
+    user_agent: navigator.userAgent,
+  };
+  entries.unshift({ name: "session.json", data: enc.encode(JSON.stringify(manifest, null, 2)) });
+  var zip = C.buildZip(entries, now);
+  var base = session.scriptName.replace(/\.txt$/i, "");
+  var name = "جلسة-" + base + "-" + stamp(now) + ".zip";
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([zip], { type: "application/zip" }));
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  session.exportedAt = now.toISOString();
+  session.exportedCount = approvedIdx.length;
+  saveSession();
+  $("exportInfo").textContent = "نزل «" + name + "» (" + approvedIdx.length + " جملة، " + (zip.length / 1048576).toFixed(1) +
+    " ميغا) بمجلد التنزيلات. بالقاعة: وصّل الجوال بالكبل وانسخو للابتوب.";
+}
+
+$("btnExport").onclick = exportSession;
+$("btnHome").onclick = function () { session = null; show("home"); renderResume(); };
 
 window.addEventListener("beforeunload", function (e) {
-  if (takes.some(function (t) { return !t.downloaded; })) { e.preventDefault(); e.returnValue = ""; }
+  // التخزين بالجوال شغّال ⟵ السكّرة آمنة (الجلسة بترجع بـ«كمّل»). التحذير بس لما التخزين فشل ومعنا جمل معتمدة.
+  if (session && !storageOk && Object.keys(session.approved).length) {
+    e.preventDefault(); e.returnValue = "";
+  }
 });
 
-$("btnRaw").onclick = function () { record("raw"); };
-$("btnProc").onclick = function () { record("processed"); };
+// ------------------------------------------------------------------ الشاشة ما تنطفي وقت الجلسة
+async function requestWake() {
+  try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) { wakeLock = null; }
+}
+document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible" && session) requestWake(); });
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").then(function () { return navigator.serviceWorker.ready; })
     .then(function () { $("offline").textContent = "أي، مخزّنة"; })
     .catch(function (e) { $("offline").textContent = "لأ: " + e.message; });
-} else {
-  $("offline").textContent = "لأ (المتصفّح ما بيدعم)";
-}
+} else { $("offline").textContent = "لأ"; }
+renderResume();
 </script>
 </body>
 </html>
